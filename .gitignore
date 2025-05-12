@@ -2,3 +2,8 @@
 renv/
 .venv/
 data/
+notebooks/
+nuke/
+.vscode/
+gc_notebooks/
+galaxy_notebooks/
