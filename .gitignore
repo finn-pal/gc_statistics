@@ -1,0 +1,4 @@
+# Ignore the renv directory and lock file
+renv/
+.venv/
+data/
