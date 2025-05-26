@@ -129,7 +129,184 @@ get_kde_from_vals <- function(xi, yi, bandwidth, xmin = c(-1, -1), xmax = c(1, 0
     kde(x = cbind(xi, yi), H = bandwidth, xmin = xmin, xmax = xmax, gridsize = gridsize)
 }
 
-# main_kde <- function(it_lst, cont_level, h_dict, sim, sim_dir, snap_lim) {}
+get_contour_area <- function(kde_res, cont_level,
+                             xmin = c(-1, -1), xmax = c(1, 0), gridsize = c(1000, 1000)) {
+    dx <- diff(kde_res$eval.points[[1]])[1]
+    dy <- diff(kde_res$eval.points[[2]])[1]
+    cell_area <- dx * dy
+
+    dobs_avg <- predict(kde_res, x = kde_res$x)
+    hts <- quantile(dobs_avg, prob = (100 - cont_level) / 100)
+
+    mask_contour <- kde_res$estimate >= hts
+
+    cont_area <- sum(mask_contour * cell_area, na.rm = TRUE)
+    full_area <- (xmax[1] - xmin[1]) * (xmax[2] - xmin[2])
+    cont_area_per <- cont_area / full_area
+
+    max_dens <- max(kde_res$estimate)
+
+    return(list(cont_area_per = cont_area_per, hts_avg = hts, max_dens = max_dens))
+}
+
+process_kl <- function(kde_p, kde_q, xmin = c(-1, -1), xmax = c(1, 0), gridsize = c(1000, 1000)) {
+    # Evaluate both KDEs on the common grid
+    grid_points <- expand.grid(
+        seq(xmin[1], xmax[1], length.out = gridsize[1]),
+        seq(xmin[2], xmax[2], length.out = gridsize[2])
+    )
+
+    # Evaluate the KDEs at grid points
+    p <- predict(kde_p, x = grid_points)
+    q <- predict(kde_q, x = grid_points)
+
+    # Compute KL divergence (avoiding division by zero)
+    mask <- (p > 0) & (q > 0)
+
+    # Normalize the masked P and Q
+    p_masked <- p[mask]
+    q_masked <- q[mask]
+
+    # Normalize both masked distributions to sum to 1
+    p_masked <- p_masked / sum(p_masked)
+    q_masked <- q_masked / sum(q_masked)
+
+    sum(p_masked * log(p_masked / q_masked))
+}
+
+iterate_kl <- function(group_id, it_lst, snap_lst, sim, sim_dir, h_dict, cont_level,
+                       var_1 = "lz_norm", var_2 = "et_norm",
+                       xmin = c(-1, -1), xmax = c(1, 0), gridsize = c(1000, 1000)) {
+    # Open the HDF5 file
+    proc_path <- file.path(sim_dir, sim, paste0(sim, "_processed.hdf5"))
+    proc_data <- H5File$new(proc_path, mode = "r")
+
+    kl_snap_avg <- c()
+    kl_snap_std <- c()
+
+    cont_snap_avg <- c()
+    cont_snap_std <- c()
+
+    dens_snap_avg <- c()
+    dens_snap_std <- c()
+
+    max_dens_avg <- c()
+    max_dens_std <- c()
+
+    for (snap in snap_lst) {
+        cat(group_id, snap, "\n")
+
+        snap_id <- get_snap_id(snap)
+        bandwidth <- h_dict[[snap_id]]
+
+        area_it_data <- c()
+        kl_it_data <- c()
+        dens_it_data <- c()
+        max_dens_it_data <- c()
+
+        for (it in it_lst) {
+            it_id <- get_it_id(it)
+            src_dat <- proc_data[[it_id]][["source"]]
+            src_grp <- abs(src_dat[["group_id"]][])
+            src_ana <- src_dat[["analyse_flag"]][]
+
+            if (group_id == 0) {
+                snap_base <- min(src_dat[["snap_zform"]][(src_grp == group_id) & (src_ana == 1)], na.rm = TRUE)
+            } else {
+                snap_base <- min(src_dat[["snap_acc"]][(src_grp == group_id) & (src_ana == 1)], na.rm = TRUE)
+            }
+
+            if (snap < snap_base) next
+
+
+            snap_data <- proc_data[[it_id]][["snapshots"]][[snap_id]]
+            snap_grp <- abs(snap_data[["group_id"]][])
+            bnd_flag <- snap_data[["bound_flag"]][]
+            acc_flag <- snap_data[["now_accreted"]][]
+            var_1_vals <- snap_data[[var_1]][]
+            var_2_vals <- snap_data[[var_2]][]
+
+            var_1_grp_vals <- var_1_vals[(snap_grp == group_id) & (bnd_flag == 1) & (acc_flag == 1)]
+            var_2_grp_vals <- var_2_vals[(snap_grp == group_id) & (bnd_flag == 1) & (acc_flag == 1)]
+
+            var_1_rst_vals <- var_1_vals[(snap_grp != group_id) & (bnd_flag == 1) & (acc_flag == 1)]
+            var_2_rst_vals <- var_2_vals[(snap_grp != group_id) & (bnd_flag == 1) & (acc_flag == 1)]
+
+            # this is an important check as we have chosen the groups that on average
+            # have 5 GCS at the z=0 but some iterations this may not be true and the there
+            # are not enough GCs to create a kde
+            if (length(var_1_grp_vals) < 2 || length(var_2_grp_vals) < 2) {
+                cat("small group", it_id, "-", group_id, "\n")
+                next
+            }
+
+            if (length(var_1_rst_vals) < 2 || length(var_2_rst_vals) < 2) {
+                cat("not enough non-group GCs", it_id, "-", group_id, "\n")
+                next
+            }
+
+            # this is a bigger problem and insinuates and error in creating proc_data
+            if (length(var_1_grp_vals) != length(var_2_grp_vals)) {
+                cat("problem group", it_id, "-", group_id, "\n")
+                next
+            }
+
+            if (length(var_1_rst_vals) != length(var_2_rst_vals)) {
+                cat("problem group (rest)", it_id, "-", group_id, "\n")
+                next
+            }
+
+            kde_p <- get_kde_from_vals(
+                var_1_grp_vals, var_2_grp_vals, bandwidth
+            )
+
+            kde_q <- get_kde_from_vals(
+                var_1_rst_vals, var_2_rst_vals, bandwidth
+            )
+
+            cont_details <- get_contour_area(kde_p, cont_level)
+            it_kl <- process_kl(kde_p, kde_q)
+
+            area_it_data <- c(area_it_data, cont_details$cont_area_per)
+            kl_it_data <- c(kl_it_data, it_kl)
+            dens_it_data <- c(dens_it_data, cont_details$hts)
+            max_dens_it_data <- c(max_dens_it_data, cont_details$max_dens)
+        }
+
+        avg_area <- mean(area_it_data)
+        std_area <- sd(area_it_data)
+
+        avg_kl <- mean(kl_it_data)
+        std_kl <- sd(kl_it_data)
+
+        avg_dens <- mean(dens_it_data)
+        std_dens <- sd(dens_it_data)
+
+        avg_max_dens <- mean(max_dens_it_data)
+        std_max_dens <- sd(max_dens_it_data)
+
+        # fill lists
+        cont_snap_avg <- c(cont_snap_avg, avg_area)
+        cont_snap_std <- c(cont_snap_std, std_area)
+
+        kl_snap_avg <- c(kl_snap_avg, avg_kl)
+        kl_snap_std <- c(kl_snap_std, std_kl)
+
+        dens_snap_avg <- c(dens_snap_avg, avg_dens)
+        dens_snap_std <- c(dens_snap_std, std_dens)
+
+        max_dens_avg <- c(max_dens_avg, avg_max_dens)
+        max_dens_std <- c(max_dens_std, std_max_dens)
+    }
+
+    return(list(
+        snaps = snap_lst,
+        cont_snap_avg = cont_snap_avg, cont_snap_std = cont_snap_std,
+        kl_snap_avg = kl_snap_avg, kl_snap_std = kl_snap_std,
+        dens_snap_avg = dens_snap_avg, dens_snap_std = dens_snap_std,
+        max_dens_avg = max_dens_avg, max_dens_std = max_dens_std
+    ))
+}
 
 # plotting functions ###############################################
 
@@ -182,6 +359,20 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
             var_1_grp_vals <- var_1_vals[(snap_grp == group_id) & (bnd_flag == 1) & (acc_flag == 1)]
             var_2_grp_vals <- var_2_vals[(snap_grp == group_id) & (bnd_flag == 1) & (acc_flag == 1)]
 
+            # this is an important check as we have chosen the groups that on average
+            # have 5 GCS at the z=0 but some iterations this may not be true and the there
+            # are not enough GCs to create a kde
+            if (length(var_1_grp_vals) < 2 || length(var_2_grp_vals) < 2) {
+                cat("small group", it_id, "-", group_id, "\n")
+                next
+            }
+
+            # this is a bigger problem and insinuates and error in creating proc_data
+            if (length(var_1_grp_vals) != length(var_2_grp_vals)) {
+                cat("problem group", it_id, "-", group_id, "\n")
+                next
+            }
+
             kde_j <- get_kde_from_vals(var_1_grp_vals, var_2_grp_vals, bandwidth)
 
             kde_list[[j]] <- kde_j$estimate
@@ -189,10 +380,22 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
             if (j == 1) eval_points <- kde_j$eval.points
         }
 
-        if (length(kde_list) == 0) next
+        # if (length(kde_list) == 0) next
+        # valid_kdes <- Filter(Negate(is.null), kde_list)
+        # if (length(valid_kdes) == 0) next
 
-        kde_array <- simplify2array(kde_list)
-        kde_est_avg <- apply(kde_array, c(1, 2), mean)
+        # kde_array <- simplify2array(valid_kdes)
+        # kde_est_avg <- apply(kde_array, c(1, 2), mean)
+
+        valid_kdes <- Filter(Negate(is.null), kde_list)
+        if (length(valid_kdes) == 0) next
+
+        kde_est_avg <- if (length(valid_kdes) == 1) {
+            valid_kdes[[1]]
+        } else {
+            kde_array <- simplify2array(valid_kdes)
+            apply(kde_array, c(1, 2), mean)
+        }
 
         x_all <- do.call(rbind, x_all_list)
 
@@ -219,7 +422,9 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
             avg_kde$eval.points[[2]],
             avg_kde$estimate,
             levels = hts_avg,
-            drawlabels = FALSE,
+            drawlabels = TRUE,
+            label = round(hts_avg, 3),
+            labcex = 1.2,
             col = group_col,
             lwd = 2
         )
@@ -231,7 +436,7 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
             cex.lab = 1.5
         )
         mtext(paste("Time:", sprintf("%.3f", time), "Gyr"),
-            side = 3, line = 1.5, adj = 1, cex = 1.2, col = "blue"
+            side = 3, line = 1.5, adj = 1, cex = 1.2, col = "black"
         )
         dev.off()
 
@@ -246,8 +451,6 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
     } else {
         cat("No valid frames for group", group_id, "\n")
     }
-
-    # proc_data$close()
 }
 
 process_snapshot <- function(snap, group_ids, group_cols, it_lst, save_dir, sim, sim_dir, h_dict, cont = 75,
@@ -407,7 +610,6 @@ process_snapshot <- function(snap, group_ids, group_cols, it_lst, save_dir, sim,
 }
 
 
-
 # main #############################################################
 # set up the parser
 parser <- ArgumentParser()
@@ -418,9 +620,9 @@ parser$add_argument("-b", "--iteration_up_limit", required = TRUE, type = "integ
 parser$add_argument("-c", "--cores", required = FALSE, type = "integer", help = "number of cores to use", default = 8)
 parser$add_argument("-l", "--contour_level", required = FALSE, type = "numeric", help = "contour level", default = 75)
 parser$add_argument("-p", "--snap_limit", required = FALSE, type = "integer", help = "minimum snapshot", default = 46)
-parser$add_argument("-k", "--get_kl", required = FALSE, type = "logical", help = "get kl for groups", default = TRUE)
-parser$add_argument("-q", "--plot_grp", required = FALSE, type = "logical", help = "plot contours", default = TRUE)
-parser$add_argument("-r", "--plot_com", required = FALSE, type = "logical", help = "plot contours", default = TRUE)
+parser$add_argument("-k", "--get_kl", required = FALSE, type = "logical", help = "get kl for groups", default = FALSE)
+parser$add_argument("-q", "--plot_grp", required = FALSE, type = "logical", help = "plot contours", default = FALSE)
+parser$add_argument("-r", "--plot_com", required = FALSE, type = "logical", help = "plot contours", default = FALSE)
 
 # parse the command-line arguments
 args <- parser$parse_args()
@@ -467,15 +669,6 @@ group_map <- gc_group_data[[sim]]
 group_ids <- as.numeric(names(group_map))
 group_cols <- as.character(unname(group_map[as.character(group_ids)]))
 
-
-# Optionally, convert to numeric if you want group_ids as numbers
-
-
-
-##############################
-
-
-
 # Test ######################################
 # snap <- 600
 # group_id <- groups[[2]]
@@ -489,14 +682,20 @@ group_cols <- as.character(unname(group_map[as.character(group_ids)]))
 
 h_dict <- get_bandwidth(it_lst, sim, sim_dir)
 
-# mcmapply(
-#     function(group_id, group_col) {
-#         plot_contours_ind(group_id, group_col, it_lst, snap_lst, save_dir, sim, sim_dir, h_dict, contour_level)
-#     },
-#     group_id = groups,
-#     group_col = group_cols,
-#     mc.cores = cores
-# )
+if (plot_grp) {
+    start_time <- proc.time()
+    mcmapply(
+        function(group_id, group_col) {
+            plot_contours_ind(group_id, group_col, it_lst, snap_lst, save_dir, sim, sim_dir, h_dict, contour_level)
+        },
+        group_id = group_ids,
+        group_col = group_cols,
+        mc.cores = cores
+    )
+    elapsed_time <- proc.time() - start_time
+    cat("Time to plot group contours:", elapsed_time["elapsed"], "sec\n")
+    cat("\n")
+}
 
 
 
@@ -508,15 +707,44 @@ h_dict <- get_bandwidth(it_lst, sim, sim_dir)
 # Run in parallel
 # frame_paths <- mclapply(seq_along(snap_lst), process_snapshot, mc.cores = cores)
 
-frame_paths <- mclapply(
-    snap_lst,
-    function(snap) {
-        process_snapshot(snap, group_ids, group_cols, it_lst, save_dir, sim, sim_dir, h_dict, contour_level)
-    },
-    mc.cores = cores
-)
+if (plot_com) {
+    start_time <- proc.time()
+    frame_paths <- mclapply(
+        snap_lst,
+        function(snap) {
+            process_snapshot(snap, group_ids, group_cols, it_lst, save_dir, sim, sim_dir, h_dict, contour_level)
+        },
+        mc.cores = cores
+    )
 
-# Build GIF
-frames <- image_read(unlist(frame_paths))
-gif <- image_animate(frames, fps = 2)
-image_write(gif, path = file.path(save_dir, "combined_groups.gif"))
+    elapsed_time <- proc.time() - start_time
+    cat("Time to plot combined contours:", elapsed_time["elapsed"], "sec\n")
+    cat("\n")
+
+    # Build GIF
+    frames <- image_read(unlist(frame_paths))
+    gif <- image_animate(frames, fps = 2)
+    image_write(gif, path = file.path(save_dir, "combined_groups.gif"))
+}
+
+
+if (get_kl) {
+    start_time <- proc.time()
+    results <- mclapply(
+        group_ids,
+        function(group_id) {
+            group_dict <- iterate_kl(group_id, it_lst, snap_lst, sim, sim_dir, h_dict, contour_level)
+        },
+        mc.cores = cores
+    )
+
+    # Name the list using group IDs
+    names(results) <- as.character(group_ids)
+
+    elapsed_time <- proc.time() - start_time
+    cat("Time to plot get kls:", elapsed_time["elapsed"], "sec\n")
+    cat("\n")
+
+    output_path <- file.path(sim_dir, sim, "kl_data.json")
+    write_json(results, output_path, pretty = TRUE, auto_unbox = TRUE)
+}
