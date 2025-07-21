@@ -229,8 +229,12 @@ def averaged_metric(report, group_keys, metric="f1-score", exclude_group="0"):
         total_m_sum += value
         total_counts += count
 
-    w_avg = total_w_sum / total_counts
-    m_avg = total_m_sum / num_grps
+    if total_counts == 0:
+        w_avg = np.nan
+        m_avg = np.nan
+    else:
+        w_avg = total_w_sum / total_counts
+        m_avg = total_m_sum / num_grps
 
     return w_avg, m_avg
 
@@ -249,11 +253,13 @@ def group_snap_clustering(it, proc_data, cluster_type, n_clusters, variables, sn
         for group in group_keys:
             if group not in group_dict.keys():
                 group_dict[group] = {"snap": [], "recall": [], "precision": [], "f1": []}
+                # group_dict[group] = {"snap": [], "recall": [], "precision": [], "f1": [], "support": []}
 
             group_dict[group]["snap"].append(snap)
             group_dict[group]["recall"].append(report[group]["recall"])
             group_dict[group]["precision"].append(report[group]["precision"])
             group_dict[group]["f1"].append(report[group]["f1-score"])
+            # group_dict[group]["support"].append(report[group]["support"])
 
         if "ex_situ" not in group_dict.keys():
             group_dict["ex_situ"] = {

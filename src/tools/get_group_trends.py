@@ -223,6 +223,7 @@ def get_group_data(it_lst, sim, sim_dir, snap_lim, cluster_types, cluster_lim, n
         grp_dict[cluster_type]["groups"] = {}
         for group_id in group_lst:
             grp_dict[cluster_type]["groups"][str(group_id)] = cluster_dict["groups"][str(group_id)]
+        # grp_dict[cluster_type]["groups"] = cluster_dict["groups"]
 
         print("")
 

@@ -47,7 +47,7 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--iteration_low_limit", required=True, type=int, help="lower bound iteration")
     parser.add_argument("-b", "--iteration_up_limit", required=True, type=int, help="upper bound iteration")
     parser.add_argument("-l", "--snap_lim", required=False, default=46, type=int, help="lower snapshot limit")
-    parser.add_argument("-c", "--cluster_lim", required=False, default=100, type=int, help="cluster limit")
+    parser.add_argument("-c", "--cluster_lim", required=False, default=60, type=int, help="cluster limit")
 
     args = parser.parse_args()
 
