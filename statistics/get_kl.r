@@ -680,7 +680,7 @@ group_cols <- as.character(unname(group_map[as.character(group_ids)]))
 # var_1_axis <- expression(epsilon)
 # var_2_axis <- "e"
 
-h_dict <- get_bandwidth(it_lst, sim, sim_dir)
+h_dict <- get_bandwidth(it_lst, sim, sim_dir, snap_limit)
 
 if (plot_grp) {
     start_time <- proc.time()
