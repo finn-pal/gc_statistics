@@ -483,9 +483,11 @@ process_snapshot <- function(snap, group_ids, group_cols, it_lst, save_dir, sim,
         kde_list <- list()
         x_all_list <- list()
 
-        for (j in seq_along(it_lst)) {
-            it <- it_lst[[j]]
-            it_id <- get_it_id(it)
+        # for (j in seq_along(it_lst)) {
+        # it <- it_lst[[j]]
+        # it_id <- get_it_id(it)
+        for (j in seq_along(proc_data)) {
+            it_id <- names(proc_data)[j]
 
             src_dat <- proc_data[[it_id]][["source"]]
             src_grp <- abs(src_dat[["group_id"]][])
