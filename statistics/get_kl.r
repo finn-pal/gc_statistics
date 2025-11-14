@@ -455,7 +455,7 @@ plot_contours_ind <- function(group_id, group_col, it_lst, snap_lst, save_dir, s
 
 process_snapshot <- function(snap, group_ids, group_cols, it_lst, save_dir, sim, sim_dir, h_dict, cont = 75,
                              var_1 = "lz_norm", var_2 = "et_norm",
-                             var_1_axis = expression(epsilon), var_2_axis = "e") {
+                             var_1_axis = expression(xi), var_2_axis = expression(epsilon)) {
     # Open the HDF5 file
     proc_path <- file.path(sim_dir, sim, paste0(sim, "_processed.hdf5"))
     proc_data <- H5File$new(proc_path, mode = "r")
@@ -483,11 +483,11 @@ process_snapshot <- function(snap, group_ids, group_cols, it_lst, save_dir, sim,
         kde_list <- list()
         x_all_list <- list()
 
-        # for (j in seq_along(it_lst)) {
-        # it <- it_lst[[j]]
-        # it_id <- get_it_id(it)
-        for (j in seq_along(proc_data)) {
-            it_id <- names(proc_data)[j]
+        for (j in seq_along(it_lst)) {
+            it <- it_lst[[j]]
+            it_id <- get_it_id(it)
+            # for (j in seq_along(proc_data)) {
+            #     it_id <- names(proc_data)[j]
 
             src_dat <- proc_data[[it_id]][["source"]]
             src_grp <- abs(src_dat[["group_id"]][])
@@ -659,7 +659,15 @@ colnames(snap_pub_data) <- c(
 )
 snap_lst <- snap_pub_data[snap_pub_data$index >= snap_limit, "index"]
 
+# it_lst <- seq(it_min, it_max, by = 1)
+
+# Build the initial sequence
 it_lst <- seq(it_min, it_max, by = 1)
+it_df <- read.csv(file.path(sim_dir, "iteration_check.csv"))
+it_msk <- it_df[[sim]] != 0 # sim is a column name stored in a variable
+it_skip_arr <- it_df$it_id[it_msk]
+it_lst <- it_lst[!(get_it_id(it_lst) %in% it_skip_arr)]
+cat(it_lst)
 
 ##############################################
 

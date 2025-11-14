@@ -110,7 +110,7 @@ get_kde_from_vals <- function(xi, yi, bandwidth, xmin = c(-1, -1), xmax = c(1, 0
 
 process_snapshot_plot <- function(snap, group_ids, group_cols, it_lst, sim, sim_dir, bandwidth, cont = 75,
                                   var_1 = "lz_norm", var_2 = "et_norm",
-                                  var_1_axis = expression(epsilon), var_2_axis = "e") {
+                                  var_1_axis = expression(xi), var_2_axis = expression(epsilon)) {
     # Open the HDF5 file
     proc_path <- file.path(sim_dir, sim, paste0(sim, "_processed.hdf5"))
     proc_data <- H5File$new(proc_path, mode = "r")
@@ -187,14 +187,7 @@ process_snapshot_plot <- function(snap, group_ids, group_cols, it_lst, sim, sim_
 
         if (first_group) {
             plot.new()
-            # plot.window(
-            #     xlim = range(avg_kde$eval.points[[1]]),
-            #     ylim = range(avg_kde$eval.points[[2]])
-            # )
-            plot.window(
-                xlim = c(-1, 1),
-                ylim = c(-1, 0)
-            )
+            plot.window(xlim = c(-1, 1), ylim = c(-1, 0), xaxs = "i", yaxs = "i")
             axis(1)
             axis(2)
             box()
@@ -208,18 +201,13 @@ process_snapshot_plot <- function(snap, group_ids, group_cols, it_lst, sim, sim_
             drawlabels = FALSE,
             add = TRUE,
             col = group_col,
-            lwd = 2,
-            xlim = c(-1, 1),
-            ylim = c(-1, 0)
+            lwd = 2
         )
     }
 
     title(xlab = var_1_axis, ylab = var_2_axis, cex.lab = 1.5)
 
-    # forcibly reset plot limits
-    par(usr = c(-1, 1, -1, 0))
-
-    offset <- 0.02 * diff(par("usr")[3:4])
+    offset <- 0.05 * diff(par("usr")[3:4])
     x_range <- diff(par("usr")[1:2])
     for (g in seq_along(group_labels)) {
         if (g == 1) {
@@ -232,7 +220,7 @@ process_snapshot_plot <- function(snap, group_ids, group_cols, it_lst, sim, sim_
         }
         text(
             x = x_pos,
-            y = par("usr")[4] - offset,
+            y = par("usr")[3] + offset,
             labels = group_labels[[g]],
             adj = c(0, 1), cex = 1.2, col = group_cols[[g]]
         )
@@ -266,7 +254,13 @@ contour_level <- args$contour_level
 snap <- args$snapshot
 
 sim_dir <- "/Users/z5114326/Documents/simulations"
+
 it_lst <- seq(it_min, it_max, by = 1)
+it_df <- read.csv(file.path(sim_dir, "iteration_check.csv"))
+it_msk <- it_df[[sim]] != 0 # sim is a column name stored in a variable
+it_skip_arr <- it_df$it_id[it_msk]
+it_lst <- it_lst[!(get_it_id(it_lst) %in% it_skip_arr)]
+cat(it_lst)
 
 # Groups ######################################
 
